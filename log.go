@@ -3,8 +3,8 @@ package log
 import (
 	"context"
 	"github.com/google/uuid"
-	"github.com/jiebutech/config"
 	"github.com/sirupsen/logrus"
+	"gitlab.jiebu.com/base/config"
 )
 
 var logger = logrus.New()
