@@ -2,8 +2,11 @@ package log
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/google/uuid"
 	"gitlab.jiebu.com/base/config"
+	"gitlab.jiebu.com/base/log/notify"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -11,7 +14,12 @@ import (
 	"path/filepath"
 )
 
-var zapLogger *zap.Logger
+type eaLogger struct {
+	zapLogger *zap.Logger
+	notifier  notify.Notifier
+}
+
+var logger *eaLogger
 
 const (
 	logIdKey  = "log-id"
@@ -22,11 +30,11 @@ const (
 )
 
 func init() {
-	var err error
-	zapLogger, err = zap.NewProduction()
+	log, err := zap.NewProduction()
 	if err != nil {
 		panic(err)
 	}
+	logger = &eaLogger{zapLogger: log}
 }
 
 type apiCtx interface {
@@ -55,11 +63,11 @@ func (e errorLevelEnabler) Enabled(level zapcore.Level) bool {
 // Configure 配置log
 func Configure(cfg *config.Configuration) error {
 	if cfg.App.Debug {
-		var err error
-		zapLogger, err = zap.NewDevelopment()
+		zapLogger, err := zap.NewDevelopment()
 		if err != nil {
 			return err
 		}
+		logger.zapLogger = zapLogger
 	} else {
 		debugWs, err := getLogWriter(*cfg.Log, "debug")
 		if err != nil {
@@ -79,10 +87,11 @@ func Configure(cfg *config.Configuration) error {
 		infoCore := zapcore.NewCore(zapcore.NewJSONEncoder(prodconf), infoWs, infoLevelEnabler(""))
 		errCore := zapcore.NewCore(zapcore.NewJSONEncoder(prodconf), errorWs, errorLevelEnabler(""))
 
-		zapLogger = zap.New(zapcore.NewTee(debugCore, infoCore, errCore))
-		if err != nil {
-			return err
-		}
+		zapLogger := zap.New(zapcore.NewTee(debugCore, infoCore, errCore))
+		logger.zapLogger = zapLogger
+	}
+	if cfg.Log.DingtalkAlarm != nil {
+		logger.notifier = notify.NewDingtalkNotifyClient(cfg.Log.DingtalkAlarm.AccessToken, cfg.Log.DingtalkAlarm.SignSecret)
 	}
 	return nil
 }
@@ -139,11 +148,11 @@ func InjectLogID(ctx setter) {
 func injectCommonValue(ctx context.Context) *zap.Logger {
 	ac, ok := ctx.(apiCtx)
 
-	logger := zapLogger.With(zap.Any(logIdKey, ctx.Value(logIdKey)))
+	l := logger.zapLogger.With(zap.Any(logIdKey, ctx.Value(logIdKey)))
 	if ok {
-		logger = logger.With(zap.Any(userIdKey, ac.AuthUserID()), zap.Any(uriKey, ac.RequestURI()))
+		l = l.With(zap.Any(userIdKey, ac.AuthUserID()), zap.Any(uriKey, ac.RequestURI()))
 	}
-	return logger
+	return l
 }
 
 // Debug 输出Debug日志
@@ -169,4 +178,24 @@ func Error(ctx context.Context, msg string, fields ...zap.Field) {
 // Panic 输出Panic日志
 func Panic(ctx context.Context, msg string, fields ...zap.Field) {
 	injectCommonValue(ctx).Panic(msg, fields...)
+}
+
+const alarmTemplate = `
+| Title     | %s   |
+| -------- | ---- |
+| Request-ID | %s |
+| Message | %s |
+| Context | %s |
+`
+
+// Alarm 通知
+func Alarm(ctx context.Context, title, msg string, reqCtx interface{}, at ...string) {
+	if logger.notifier == nil {
+		return
+	}
+	go func() {
+		logContext, _ := json.Marshal(reqCtx)
+		content := fmt.Sprintf(alarmTemplate, title, ctx.Value(logIdKey), msg, string(logContext))
+		_ = logger.notifier.SendMarkdown(title, content, at...)
+	}()
 }
