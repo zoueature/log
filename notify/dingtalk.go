@@ -2,10 +2,16 @@ package notify
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"time"
 )
 
 // https://oapi.dingtalk.com/robot/send?access_token=7389ed52ebd684b9c194237ff718161311630526a1e1631c3362084bae7ee8fe
@@ -13,11 +19,15 @@ import (
 const dingtalkNotifyURL = "https://oapi.dingtalk.com/robot/send"
 
 type dingTalkRobotClient struct {
-	apiURL string
+	accessToken string
+	signSecret  string
 }
 
-func NewDingtalkNotifyClient(accessToken string) Notifier {
-	return &dingTalkRobotClient{apiURL: dingtalkNotifyURL + "?access_token=" + accessToken}
+func NewDingtalkNotifyClient(accessToken string, signSecret string) Notifier {
+	return &dingTalkRobotClient{
+		accessToken: accessToken,
+		signSecret:  signSecret,
+	}
 }
 
 type markdownMsgBody struct {
@@ -38,13 +48,23 @@ type respMsg struct {
 	Errmsg  string `json:"errmsg"`
 }
 
-const msgtype_markdown = "markdown"
-const okcode = 0
+const msgTypeMarkdown = "markdown"
+const okCode = 0
+
+func (cli *dingTalkRobotClient) sign() (string, string) {
+	timeStamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	s := timeStamp + "\n" + cli.signSecret
+	hash := hmac.New(sha256.New, []byte(cli.signSecret))
+	hash.Write([]byte(s))
+	hashResult := hash.Sum(nil)
+
+	return timeStamp, base64.StdEncoding.EncodeToString(hashResult)
+}
 
 func (cli *dingTalkRobotClient) SendMarkdown(title, content string, atMobile ...string) error {
 	httpClient := http.Client{}
 	msg := markdownMsgBody{}
-	msg.Msgtype = msgtype_markdown
+	msg.Msgtype = msgTypeMarkdown
 	msg.Markdown.Title = title
 	msg.Markdown.Text = content
 	msg.At.AtMobiles = atMobile
@@ -53,7 +73,12 @@ func (cli *dingTalkRobotClient) SendMarkdown(title, content string, atMobile ...
 		return err
 	}
 	reader := bytes.NewReader(jsonStr)
-	req, err := http.NewRequest(http.MethodPost, cli.apiURL, reader)
+	param := url.Values{}
+	timestamp, sign := cli.sign()
+	param.Add("timestamp", timestamp)
+	param.Add("sign", sign)
+	param.Add("access_token", cli.accessToken)
+	req, err := http.NewRequest(http.MethodPost, dingtalkNotifyURL+"?"+param.Encode(), reader)
 	req.Header.Add("Content-Type", "application/json")
 	if err != nil {
 		return err
@@ -74,7 +99,7 @@ func (cli *dingTalkRobotClient) SendMarkdown(title, content string, atMobile ...
 	if err != nil {
 		return err
 	}
-	if respData.Errcode != okcode {
+	if respData.Errcode != okCode {
 		return errors.New(respData.Errmsg)
 	}
 	return nil
