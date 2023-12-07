@@ -3,7 +3,7 @@ package log
 import (
 	"context"
 	"github.com/google/uuid"
-	"gitlab.jiebu.com/base/config"
+	"github.com/zoueature/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
