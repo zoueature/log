@@ -90,8 +90,8 @@ func Configure(cfg *config.Configuration) error {
 		zapLogger := zap.New(zapcore.NewTee(debugCore, infoCore, errCore))
 		logger.zapLogger = zapLogger
 	}
-	if cfg.Log.DingNotifyToken != "" {
-		logger.notifier = notify.NewDingtalkNotifyClient(cfg.Log.DingNotifyToken)
+	if cfg.Log.DingtalkAlarm != nil {
+		logger.notifier = notify.NewDingtalkNotifyClient(cfg.Log.DingtalkAlarm.AccessToken, cfg.Log.DingtalkAlarm.SignSecret)
 	}
 	return nil
 }
