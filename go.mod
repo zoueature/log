@@ -4,7 +4,7 @@ go 1.21.4
 
 require (
 	github.com/google/uuid v1.4.0
-	github.com/zoueature/config v0.0.3
+	github.com/zoueature/config v0.0.4
 	go.uber.org/zap v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
